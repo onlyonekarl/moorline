@@ -32,7 +32,7 @@ async function main() {
 
   const from = pick(tokens, "USDC", "arb");
   const to = pick(tokens, "USDC", "eth");
-  const amount = BigInt(5 * 10 ** from.decimals).toString();
+  const amount = BigInt(50 * 10 ** from.decimals).toString();
 
   const body = {
     dry: true,
