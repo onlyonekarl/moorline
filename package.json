@@ -1,0 +1,25 @@
+{
+  "name": "moorline",
+  "version": "1.0.0",
+  "description": "Cross-chain liquidation shield built on NEAR Intents",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onlyonekarl/moorline.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/onlyonekarl/moorline/issues"
+  },
+  "homepage": "https://github.com/onlyonekarl/moorline#readme",
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
