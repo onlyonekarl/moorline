@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moorline</title>
+<style>
+  * { box-sizing: border-box; }
+  body { background:#0b1220; color:#e6edf7; font-family:system-ui,sans-serif; max-width:640px; margin:0 auto; padding:24px; }
+  h1 { margin:0; font-size:34px; }
+  .sub { color:#7f93b2; margin-bottom:20px; }
+  .card { background:#131c2f; border-radius:14px; padding:20px; margin-bottom:16px; }
+  .tag { color:#7f93b2; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+  .hf { font-size:64px; font-weight:700; line-height:1.1; }
+  .safe { color:#4ade80; } .warn { color:#fbbf24; } .danger { color:#f87171; }
+  .bar { height:10px; background:#1e2a44; border-radius:6px; overflow:hidden; margin-top:12px; }
+  .fill { height:100%; transition:width .3s, background .3s; }
+
+  .banner { border-radius:14px; padding:16px 20px; margin-bottom:16px; font-weight:700; font-size:18px; display:flex; align-items:center; gap:12px; transition:background .3s, color .3s; }
+  .banner small { display:block; font-weight:400; font-size:13px; opacity:.85; margin-top:2px; }
+  .b-watch { background:#12301f; color:#4ade80; }
+  .b-danger { background:#3b1717; color:#f87171; }
+  .b-saved { background:#4ade80; color:#06220f; }
+  .b-blocked { background:#3a2f10; color:#fbbf24; }
+  .dot { width:12px; height:12px; border-radius:50%; background:currentColor; flex:none; }
+  .b-watch .dot, .b-danger .dot { animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+
+  button { background:#3b82f6; color:white; border:0; padding:14px 22px; border-radius:10px; font-size:16px; width:100%; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+
+  .quote { display:none; }
+  .quote.show { display:block; }
+  .row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid #1e2a44; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:#7f93b2; }
+  .row b { font-variant-numeric:tabular-nums; }
+  .chip { display:inline-block; padding:4px 10px; border-radius:999px; font-size:13px; font-weight:700; }
+  .chip.ok { background:#12301f; color:#4ade80; }
+  .chip.no { background:#3a2f10; color:#fbbf24; }
+
+  .log div { padding:6px 0; border-bottom:1px solid #1e2a44; font-size:14px; }
+</style>
+</head>
+<body>
+  <h1>Moorline</h1>
+  <div class="sub">Cross-chain liquidation shield on NEAR Intents</div>
+
+  <div id="banner" class="banner b-watch">
+    <span class="dot"></span>
+    <div><span id="btitle">Monitoring position</span><small id="bsub">Waiting for market conditions</small></div>
+  </div>
+
+  <div class="card">
+    <div class="tag">Health factor</div>
+    <div id="hf" class="hf safe">2.00</div>
+    <div class="bar"><div id="fill" class="fill"></div></div>
+    <div class="tag" id="pol" style="margin-top:12px;text-transform:none;letter-spacing:0;font-size:13px"></div>
+  </div>
+
+  <button id="btn" onclick="crash()">Simulate market crash</button>
+
+  <div id="quoteCard" class="card quote" style="margin-top:16px">
+    <div class="tag" style="margin-bottom:6px">Live NEAR Intents quote</div>
+    <div class="row"><span>Route</span><b>Arbitrum &rarr; Ethereum</b></div>
+    <div class="row"><span>You send</span><b id="qin">-</b></div>
+    <div class="row"><span>You receive</span><b id="qout">-</b></div>
+    <div class="row"><span>Swap fee</span><b id="qfee">-</b></div>
+    <div class="row"><span>Policy check</span><span id="qverdict"></span></div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="tag">Activity (live quotes, simulated execution)</div>
+    <div id="log" class="log"></div>
+  </div>
+
+<script>
+let policy, hf = 2.0, running = false;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const $ = (id) => document.getElementById(id);
+
+function banner(kind, title, sub) {
+  $("banner").className = "banner b-" + kind;
+  $("btitle").textContent = title;
+  $("bsub").textContent = sub;
+}
+
+function render() {
+  const el = $("hf");
+  el.textContent = hf.toFixed(2);
+  const cls = hf < policy.triggerHF ? "danger" : hf < policy.triggerHF + 0.3 ? "warn" : "safe";
+  el.className = "hf " + cls;
+  const fill = $("fill");
+  fill.style.width = Math.max(0, Math.min(100, (hf - 1) * 100)) + "%";
+  fill.style.background = cls === "safe" ? "#4ade80" : cls === "warn" ? "#fbbf24" : "#f87171";
+}
+
+function log(msg) {
+  const d = document.createElement("div");
+  d.textContent = new Date().toLocaleTimeString() + "  " + msg;
+  $("log").prepend(d);
+}
+
+function showQuote(q, approved) {
+  $("quoteCard").classList.add("show");
+  $("qin").textContent = q.amountIn.toFixed(2) + " USDC";
+  $("qout").textContent = q.amountOut.toFixed(4) + " USDC";
+  $("qfee").textContent = q.feePct.toFixed(2) + "%";
+  $("qverdict").innerHTML = approved
+    ? '<span class="chip ok">APPROVED</span>'
+    : '<span class="chip no">BLOCKED</span>';
+}
+
+async function rescue() {
+  const usd = Math.min(policy.maxSpendUsd, Math.max(policy.minRescueUsd, 25 + (policy.triggerHF - hf) * 100));
+  banner("danger", "Danger: rescue triggered", "Health factor " + hf.toFixed(2) + " is below " + policy.triggerHF + ". Planning a $" + usd.toFixed(2) + " rescue.");
+  log("TRIGGERED at HF " + hf.toFixed(2) + ". Planning rescue of $" + usd.toFixed(2));
+
+  const q = await (await fetch("/api/quote?usd=" + usd)).json();
+  if (q.error) { log("Quote error: " + q.error); banner("blocked", "Quote failed", q.error); return; }
+
+  log("Quote: " + q.amountIn + " USDC (Arbitrum) in, " + q.amountOut + " USDC (Ethereum) out, fee " + q.feePct.toFixed(2) + "%");
+  const approved = q.feePct <= policy.maxFeePct;
+  showQuote(q, approved);
+
+  if (!approved) {
+    log("BLOCKED by policy: fee above " + policy.maxFeePct + "%");
+    banner("blocked", "Rescue blocked by policy", "Fee " + q.feePct.toFixed(2) + "% is above your " + policy.maxFeePct + "% limit.");
+    return;
+  }
+
+  log("APPROVED by policy. Executing rescue (simulated)...");
+  banner("danger", "Executing rescue", "Moving funds across chains with NEAR Intents (simulated)");
+  await sleep(1200);
+  while (hf < 1.9) { hf = Math.round((hf + 0.05) * 100) / 100; render(); await sleep(120); }
+  log("Position saved. Health factor restored to " + hf.toFixed(2));
+  banner("saved", "POSITION RESCUED", "Health factor restored to " + hf.toFixed(2) + ". Liquidation avoided.");
+}
+
+async function crash() {
+  if (running) return;
+  running = true;
+  $("btn").disabled = true;
+  $("quoteCard").classList.remove("show");
+  hf = 2.0; render();
+  banner("watch", "Market is falling", "Moorline is watching your position");
+  log("Crash simulation started");
+  while (hf > 1.0) {
+    hf = Math.round((hf - 0.05) * 100) / 100;
+    render();
+    if (hf < policy.triggerHF) { await rescue(); break; }
+    await sleep(400);
+  }
+  running = false;
+  $("btn").disabled = false;
+}
+
+(async () => {
+  policy = await (await fetch("/api/policy")).json();
+  $("pol").textContent =
+    "Policy: rescue below " + policy.triggerHF + ", max $" + policy.maxSpendUsd +
+    " per rescue, min $" + policy.minRescueUsd + ", max fee " + policy.maxFeePct + "%";
+  render();
+})();
+</script>
+</body>
+</html>
